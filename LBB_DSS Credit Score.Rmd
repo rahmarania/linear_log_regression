@@ -1,0 +1,225 @@
+---
+title: "LBB DSS Credit Score"
+author: "Rahma Fairuz Rania"
+date: "2024-06-29"
+output: 
+  prettydoc::html_pretty:
+    theme: hpstr
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# LBB DSS Behaviour Credit Score
+
+## Problem Statement
+
+As Data team, we have assumption in this bank that we are credit company that have market share. We want to decrease bad rate loss potential.
+
+Objectives : To minimize losses, stricter cutoffs are needed in the scorecard.
+
+## Library
+
+```{r, message=FALSE, warning=FALSE}
+# install libraries
+source("setup.R")
+library(dplyr)      # data manipulation
+library(UBL)        # upsampling
+library(scorecard)  # scorecard
+```
+
+## Data Input
+
+```{r, message=FALSE, warning=FALSE}
+dt <- read.csv("bankloans.csv")
+head(dt)
+```
+Dataset can be found [here](https://www.kaggle.com/datasets/atulmittal199174/credit-risk-analysis-for-extending-bank-loans?resource=download). Description of our dataset is below
+
+- `age` : Age of the Customers
+- `ed` : Education Level
+- `employ` : Work Experience
+- `address` : Address of the Customer
+- `income` : Yearly Income of the Customer
+- `debtinc` : Debt to Income Ratio
+- `creddebt` : Credit to Debt Ratio
+- `othdebt` : Other Debts
+- `def` : Target, 0 default, 1 not default
+
+## Exploratory Data Analysis
+
+```{r, message=FALSE, warning=FALSE}
+# check data types
+describe(dt)
+```
+```{r, message=FALSE, warning=FALSE}
+# change data types
+dt <- dt %>% mutate(ed = as.factor(ed))
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+# check data balance
+prop.table(table(dt$def))
+```
+
+We can consider our target has balance data even though the class proportion is 70:30.
+
+## Data Preprocessing
+
+```{r, message=FALSE, warning=FALSE}
+# split into train and test
+set.seed(572)
+idx <- sample(x = nrow(dt), size = nrow(dt) * 0.8)
+
+train <- dt[idx,]
+test <- dt[-idx,]
+```
+
+```{r, message=FALSE, warning=FALSE}
+prop.table(table(train$def))
+```
+## Initial Characteristic Analysis
+
+### Weight of Evidence (WoE)
+
+We want to classify (binning) splitting positive and negative class. This would make scorecard analysis more easy. We can see how each class has potential risk.
+
+```{r, message=FALSE, warning=FALSE}
+binning <- woebin(dt = train,
+                  y = 'def',
+                  positive = 0)
+binning
+```
+
+From income binning, the yearly income range 24 to 39 and 54 to inf has positive WoE values means that range of income is good if we approved, most people can pay (not default) about 76% to 83%. Change train data and test data into woebin form by apply woebin.
+
+```{r, message=FALSE, warning=FALSE}
+# apply woebin train
+train_woe <- woebin_ply(dt = train,
+                        bins = binning)
+head(train_woe)
+```
+```{r, message=FALSE, warning=FALSE}
+# apply woebin test
+test_woe <- woebin_ply(dt = test,
+                        bins = binning)
+head(test_woe)
+```
+
+### Information Value (IV)
+
+**feature importance**, whether each variables give good information or not in classify positive and negative class. The result is shown descending
+
+```{r, message=FALSE, warning=FALSE}
+iv(dt = train_woe,
+   y = 'def',
+   positive = 0)
+```
+
+We don't have the unpredictive and weak variable so we don't need remove columns.
+
+## Modelling
+
+### Logistic Regression
+
+```{r, message=FALSE, warning=FALSE}
+mdl <- glm(formula = def~.,
+           data = train_woe,
+           family = 'binomial')
+summary(mdl)
+```
+Age and Education is not significant to our model. 
+
+## Prediction
+
+Evaluate model for the scorecard
+
+```{r, message=FALSE, warning=FALSE}
+test_woe$pred <- predict(object = mdl,
+                        newdata = test_woe,
+                        type = 'response')
+test_woe$pred %>% head()
+```
+
+## Scorecard
+
+Make a scorecard using universal odds0 1/19 and points0 600. Odds 1/19 means that we want to set in 19 people that positive (can pay), 1 person of them is negative (can't pay).
+
+```{r, message=FALSE, warning=FALSE}
+score_card <- scorecard(bins = binning,
+                       model = mdl,
+                       odds0 = 1/19,
+                       points0 = 600,
+                       pdo = 20)  
+
+score_card
+```
+
+```{r, message=FALSE, warning=FALSE}
+# apply train to scorecard
+score_train <- scorecard_ply(dt = train, 
+                             card = score_card,
+                             only_total_score = FALSE) 
+score_train %>% head()
+```
+```{r, message=FALSE, warning=FALSE}
+# apply test to scorecard
+score_test <- scorecard_ply(dt = test, 
+                             card = score_card,
+                             only_total_score = FALSE) 
+score_test %>% head()
+```
+We just got the score of each characteristics market from our dataset. To see how our scorecard result stable for some population, we can use Population Stability Index.
+
+## Performance Evaluation Scorecard
+
+### Population Stability Index
+
+```{r, message=FALSE, warning=FALSE}
+# score list
+score_list <- list(train = score_train$score,
+                   test = score_test$score)
+
+# label list
+label_list <- list(train = train_woe$def,
+                   test = test_woe$def)
+
+psi <- perf_psi(score = score_list, 
+                label = label_list, 
+                positive = 0) 
+psi
+```
+PSI value is under 0.10 which means there is no significant changes and our scorecard stable in population score.
+
+## Cutoff
+
+We can set the cutoff depends of our business question. In this case, our business wanted **risk under 10%**, so we set cutoff in 577 that has approval rate 40% from approval rate.
+
+```{r, message=FALSE, warning=FALSE}
+approval_rate(score = score_test$score, 
+              label = test_woe$def,
+              positive = 0)
+```
+```{r, message=FALSE, warning=FALSE}
+# predict new data
+new_data <- data.frame(list(age = 22,
+                            ed = 2,
+                            employ = 1,
+                            address = 1,
+                            income = 20,
+                            debtinc = 11.0,
+                            creddebt = 0.775656,
+                            othdebt = 1.318344))
+new_data
+```
+```{r, message=FALSE, warning=FALSE}
+res <- predict_behaviour(data = new_data,
+                         score_card = score_card,
+                         cutoff = 577)
+res
+```
+The result shows that the new data would negatively impact approval. However, it could be a good recommendation if we set the cutoff lower than before, even though it would increase the bad rate. You can adjust depends on what the needs.
+
+
