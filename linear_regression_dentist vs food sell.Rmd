@@ -1,0 +1,214 @@
+---
+title: "Linear Regression Dentist Appointment vs Food Sell"
+author: "Rahma Fairuz Rania"
+date: "2024-06-29"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This project is from DQLab Data Science Course. We want to know the relation between food selling and people go to dentist using Linear Regression. The dataset can be download here [dentist](https://storage.googleapis.com/dqlab-dataset/kunjungan_dokter_gigi_kota_x_dqlab.tsv) and [food selling](https://storage.googleapis.com/dqlab-dataset/tingkat_penjualan_kota_x_dqlab.tsv)
+
+
+## libraries
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr) # data manipulation
+library(Hmisc) # data analysis lib
+```
+
+## Data Import
+
+```{r}
+dt_dental <- read.csv("E:/2025/DQLAB/R/6 Regression/kunjungan_dokter_gigi_kota_x_dqlab.tsv", header = TRUE, sep = "\t")
+dt_food_sell <- read.csv("E:/2025/DQLAB/R/6 Regression/tingkat_penjualan_kota_x_dqlab.tsv", header = TRUE, sep = "\t")
+```
+
+```{r}
+head(dt_dental)
+```
+
+```{r}
+head(dt_food_sell)
+```
+
+```{r}
+# combine both data
+# by.x and by.y is for unique key in both data frame 
+dt <- merge(dt_dental, dt_food_sell, by.x = c("Bulan", "Tahun"), by.y = c("Bulan", "Tahun"), sort = FALSE)
+str(dt)
+```
+
+## Data Wrangling and Visualization
+
+```{r}
+summary(dt)
+```
+People who consumed candies and bananas higher than who consumed cereal. The maximum doctor appointment is quite high, there are 132 times people going to dentist.
+
+Not everyone will get toothache after consuming candies, bananas, or cereal. Then we should search for the delay effect, the time gap between we eating food and get toothache.
+
+```{r}
+delayed <- data.frame(month = dt$Bulan, year = dt$Tahun,
+                      dentist_appointment = dt$tingkat.kunjungan.ke.dokter.gigi,
+                      
+                      # candy
+                      candy_sell = dt$penjualan.permen,
+                      # lag, n for monthly
+                      candy_sell1 = lag(dt$penjualan.permen),
+                      candy_sell2 = lag(dt$penjualan.permen,2),
+                      candy_sell3 = lag(dt$penjualan.permen,3),
+                      candy_sell4 = lag(dt$penjualan.permen,4),
+                      candy_sell5 = lag(dt$penjualan.permen,5),
+                      candy_sell6 = lag(dt$penjualan.permen,6),
+                      
+                      # bananas
+                      banana_sell = dt$penjualan.buah.pisang,
+                      banana_sell1 = lag(dt$penjualan.buah.pisang),
+                      banana_sell2 = lag(dt$penjualan.buah.pisang,2),
+                      banana_sell3 = lag(dt$penjualan.buah.pisang,3),
+                      banana_sell4 = lag(dt$penjualan.buah.pisang,4),
+                      banana_sell5 = lag(dt$penjualan.buah.pisang,5),
+                      banana_sell6 = lag(dt$penjualan.buah.pisang,6),
+                      
+                      # cereal
+                      cereal_sell = dt$penjualan.sereal,
+                      cereal_sell1 = lag(dt$penjualan.sereal),
+                      cereal_sell2 = lag(dt$penjualan.sereal,2),
+                      cereal_sell3 = lag(dt$penjualan.sereal,3),
+                      cereal_sell4 = lag(dt$penjualan.sereal,4),
+                      cereal_sell5 = lag(dt$penjualan.sereal,5),
+                      cereal_sell6 = lag(dt$penjualan.sereal,6))
+delayed
+```
+
+```{r}
+# scatter for relation candy variable
+plot(delayed$dentist_appointment, delayed$candy_sell1, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 1st month", 
+     col = "red")
+```
+
+```{r}
+plot(delayed$dentist_appointment, delayed$candy_sell2, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 2nd month", 
+     col = "orange")
+```
+
+```{r}
+plot(delayed$dentist_appointment, delayed$candy_sell3, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 3rd month", 
+     col = "yellowgreen")
+```
+
+
+```{r}
+plot(delayed$dentist_appointment, delayed$candy_sell4, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 4th month", 
+     col = "green")
+```
+
+
+```{r}
+plot(delayed$dentist_appointment, delayed$candy_sell5, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 5th month", 
+     col = "blue")
+```
+
+```{r}
+plot(delayed$dentist_appointment, delayed$candy_sell6, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 6th month", 
+     col = "purple")
+```
+
+We can see from the graph, the 4th month starting to show the effect selling candy with dentist appointment. We'll see for the other variable on the 4th month. 
+
+```{r}
+plot(delayed$dentist_appointment, delayed$cereal_sell6, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 6th month", 
+     col = "gray")
+```
+```{r}
+plot(delayed$dentist_appointment, delayed$banana_sell6, 
+     pch = 20, 
+     xlab = "Dentist Appoinment", 
+     ylab = "Candies selling 6th month", 
+     col = "steelblue")
+```
+
+The other variable also starting to show the relation on the 4th month, next analysis will start from the 4th month.
+
+## Regression Model
+
+```{r}
+# Regression using basic R
+month_4th <- data.frame(month = delayed$month,
+                  year = delayed$year,
+                  dentist_appointment = delayed$dentist_appointment,
+                  candies_selling = delayed$candy_sell4,
+                  bananas_selling = delayed$banana_sell4,
+                  cereal_selling = delayed$cereal_sell4) %>% na.omit()
+month_4th
+```
+
+```{r}
+# Regression with linear model
+# dentist appointment is our target (dependent variable) and candies_selling is independent variable
+mdl_lm <- lm(dentist_appointment ~ candies_selling + bananas_selling + cereal_selling, data = month_4th)
+summary(mdl_lm)
+```
+### Interpreting the Model 
+
+From the model above, the most impactful for the dentist appointment is candies selling (shown by ***), meanwhile the other predictors (banana sell and cereal) have pvalue > 0.05 are not significant to our model.
+
+Formulas we get from the model result for the candy selling is: 
+
+y_hat = -7.004 + 0.0002112 . x 
+
+Intercept (b0) is a constant, slope (b1) is coefficient of candies_selling. The intercept value is negative, which means it is not realistic for dentist appointments number. It may indicate that people visit dentist for another reasone beside sugar causes or other missing factor like general health habits or insurances. 
+
+For example, the candies selling is 100,000, then 
+
+y_hat = -7.004 + 0.0002112 . 100000 
+
+y_hat = -7.004 + 21.12 
+
+y_hat = 14.116 
+
+This means for every candy sales increased by 100k will affect the dentist appointment. The dentist appointment will increase 14 people for the next 4 months.    
+
+The Residual Standard Error is 13.47, means that the average of an error in prediction is 13 appointments. The R-squared is about 73% of dentist appointment explained by the predictors.
+
+
+
+```{r}
+predict_data <- data.frame(
+     month = c(1,2,3,4,5),
+     year = c(1998,1998,1998,1998,1998),
+     candies_selling = c(345646,454344,346987,209854,254634),
+     bananas_selling = c(102331,234123,902313,222135,213563),
+     cereal_selling = c(4231234,213452,242556,890982,234155)
+     )
+
+predict(mdl_lm, predict_data)
+```
+
+This is prediction dentist appointment for 5 month (Jan to May) using linear regression. Many people are going to dentist in January and April due to high selling of candy, banana, and cereal.
